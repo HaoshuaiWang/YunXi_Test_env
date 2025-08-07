@@ -1,0 +1,135 @@
+--- main_backup_20250807_132020.py
++++ main_classify_node.py
+@@ -341,24 +341,51 @@
+         vertex_list = [item.vertex_code for item in data]
+
+         node_list = [item.node_code for item in data]
+
+ 
+
+-        # 一次性查询所有节点所有时刻的 flooding_losses
+
++        # 综合场景：Junction使用flooding_losses，Outfall使用total_outflow
+
+         conn = create_pg_connect()
+
+         cursor = conn.cursor()
+
+-        # 查询所有相关节点的所有时刻数据
+
+-        sql = """
+
+-            SELECT node_id, time, flooding_losses
+
+-            FROM result_swmm_node
+
+-            WHERE task_code = %s AND node_id = ANY(%s)
+
+-            ORDER BY time ASC
+
+-        """
+
+-        cursor.execute(sql, (task_code, node_list))
+
+-        rows = cursor.fetchall()
+
+-        # 组织数据：{dt: {node_code: flooding_losses}}
+
++        
+
++        # 识别节点类型
+
++        cursor.execute("""
+
++            SELECT node_id FROM swmm_node_junction 
+
++            WHERE model_id = %s AND node_id = ANY(%s)
+
++        """, (model_id, node_list))
+
++        junction_nodes = set(row[0] for row in cursor.fetchall())
+
++        
+
++        cursor.execute("""
+
++            SELECT node_id FROM swmm_node_outfall 
+
++            WHERE model_id = %s AND node_id = ANY(%s)
+
++        """, (model_id, node_list))
+
++        outfall_nodes = set(row[0] for row in cursor.fetchall())
+
++        
+
++        # 分类查询数据
+
+         time_dict = {}
+
+-        for node_id, time, flooding_losses in rows:
+
+-            if time not in time_dict:
+
+-                time_dict[time] = {}
+
+-            time_dict[time][node_id] = float(flooding_losses or 0)
+
++        
+
++        # Junction节点：查询flooding_losses
+
++        if junction_nodes:
+
++            cursor.execute("""
+
++                SELECT node_id, time, flooding_losses
+
++                FROM result_swmm_node
+
++                WHERE task_code = %s AND node_id = ANY(%s)
+
++                ORDER BY time ASC
+
++            """, (task_code, list(junction_nodes)))
+
++            for node_id, time, flooding_losses in cursor.fetchall():
+
++                if time not in time_dict:
+
++                    time_dict[time] = {}
+
++                time_dict[time][node_id] = float(flooding_losses or 0)
+
++        
+
++        # Outfall节点：查询total_outflow
+
++        if outfall_nodes:
+
++            cursor.execute("""
+
++                SELECT node_id, time, total_outflow
+
++                FROM result_swmm_node
+
++                WHERE task_code = %s AND node_id = ANY(%s)
+
++                ORDER BY time ASC
+
++            """, (task_code, list(outfall_nodes)))
+
++            for node_id, time, total_outflow in cursor.fetchall():
+
++                if time not in time_dict:
+
++                    time_dict[time] = {}
+
++                time_dict[time][node_id] = float(total_outflow or 0)
+
+         time_list = sorted(time_dict.keys())
+
+         # 按时间和node顺序组装二维数组
+
+         all_losses = []
+
